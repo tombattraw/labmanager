@@ -1,4 +1,4 @@
-#!env python3
+#!/usr/bin/env python3
 
 import os, subprocess, argparse, pathlib, shutil, yaml, sys, time, paramiko, datetime
 from scp import SCPClient
@@ -20,7 +20,7 @@ class Lab:
             self.description = f.readlines()[0]
 
     def start(self):
-        exercise_id = f'{self.path.parent.name}-{self.name}-{datetime.datetime.now().strftime("%H%M%S")}'
+        exercise_id = f'{self.path.parent.name}-{self.name}-{datetime.datetime.now().strftime("%d%H%M%S")}'
         print(f'Exercise ID: {exercise_id}')
         exercise = Exercise(exercise_id)
         exercise.start()
@@ -101,7 +101,7 @@ class VM:
         return ip
 
     def loadDetails(self):
-        with open(self.lab_path / 'details.txt', 'r') as f:
+        with open(self.lab_path / 'details.yaml', 'r') as f:
             creds = yaml.safe_load(f)
         self.description = creds['description']
         self.user_username = creds['user_username']
@@ -111,6 +111,7 @@ class VM:
         self.login_as_root = creds['login_as_root']
         self.show_creds = creds['show_creds']
         self.show_root_creds = creds['show_root_creds']
+        self.show_readme = creds['show_readme']
         self.ssh_port = creds['ssh_port']
         self.show_ip = creds['show_ip']
         self.os_variant = creds['os_variant']
@@ -149,7 +150,15 @@ class VM:
                 scpsocket.put(file, f'/tmp/{file.name}')
                 socket.exec_command(f'cd /tmp && chmod 755 {file.name} && /tmp/{file.name}')
             
-            if self.show_creds: scpsocket.put(self.lab_path.parent.parent / 'README.txt', 'README.txt')
+            if self.show_readme:
+                shutil.copyfile(self.lab_path.parent.parent / 'README.txt', 'tmp_README.txt')
+                with open('tmp_README.txt', 'r') as f:
+                    initial_contents = f.read()
+                with open('tmp_README.txt', 'w') as f:
+                    with open(self.lab_path / 'README.txt', 'r+') as g:
+                        g.write(initial_contents + g.read())
+                scpsocket.put( 'tmp_README.txt', 'README.txt')
+                os.remove('tmp_README.txt')
             scpsocket.close()
             socket.close()
 
@@ -160,7 +169,7 @@ class VM:
             if not self.user_username:
                 for file in self.files:
                     scpsocket.put(file, f'/tmp/{file.name}')
-                if self.show_creds: scpsocket.put(self.lab_path.parent.parent / 'README.txt', 'README.txt')
+                if self.show_readme: scpsocket.put(self.lab_path.parent.parent / 'README.txt', 'README.txt')
             for file in root_scripts:
                 scpsocket.put(file, f'/tmp/{file.name}')
                 socket.exec_command(f'cd /tmp && chmod 755 {file.name} && /tmp/{file.name}')
@@ -194,7 +203,7 @@ class VM:
 def createLab(category, name):
     (LABS_DIR / category).mkdir(exist_ok=True)
 
-    if checkExistence('lab', name, category):
+    if checkExistence('lab', name, category) is True:
         error('Lab already exists')
     
     (LABS_DIR / category / name).mkdir()
@@ -207,15 +216,7 @@ def createLab(category, name):
     Created VMs go in the "vms" directory\n\
     For each VM, put any files you wish transferred to the VM into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
     Then add any scripts you wish to run into the user or root scripts directory. They will be put into the VM\'s "/tmp" directory after it boots, then automatically executed as the appropriate user\n\
-    Remember to put credentials into the VM\'s "details.txt" file using YAML syntax from the template.\n')
-
-    VMPATH = LABPATH / 'vms' / 'SAMPLE_VM'
-    VMPATH.mkdir()
-    (VMPATH / 'user_scripts').mkdir()
-    (VMPATH / 'root_scripts').mkdir()
-    (VMPATH / 'files').mkdir()
-    with open(VMPATH / 'details.txt', 'w') as f:
-        f.write(f'description: "Default description"\nuser_username: <user>\nuser_password: <password>\n# Don\'t show credentials if the user isn\'t supposed to log in directly\nshow_creds: true\nroot_username: root\nroot_password: <password>\nshow_root_creds: false\nlogin_as_root: false\n#Don\'t show IP for scanning labs\nshow_ip: true\nssh_port: 22\nos_variant: "genericlinux2022"\ncpus: "{VMCPUS}"\nmem: "{VMMEM}"')
+    Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template.\n')
 
 def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2, iso):
     VMPATH = LABS_DIR / category / lab / 'vms' / name
@@ -226,12 +227,12 @@ def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2
     Created VMs go in the "vms" directory\n\
     For each VM, put any files you wish transferred in into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
     Then add any scripts you wish to run into the user or root scripts directory. They will be put into the VM\'s "/tmp" directory after it boots, then automatically executed as the appropriate user\n\
-    Remember to put credentials into the VM\'s "details.txt" file using YAML syntax from the template.\n')
+    Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template.\n')
     (VMPATH / 'user_scripts').mkdir()
     (VMPATH / 'root_scripts').mkdir()
     (VMPATH / 'files').mkdir()
-    with open(VMPATH / 'details.txt', 'w') as f:
-        f.write(f'description: "Write a description here"\nuser_username: <user>\nuser_password: <password>\n# Don\'t show credentials if the user isn\'t supposed to log in directly\nshow_creds: true\nroot_username: root\nroot_password: <password>\nshow_root_creds: false\nlogin_as_root: false\n#Don\'t show IP for scanning labs\nshow_ip: true\nssh_port: 22\nos_variant: "{os_variant}"\ncpus: "{cpus}"\nmem: "{memory}"')
+    with open(VMPATH / 'details.yaml', 'w') as f:
+        f.write(f'description: "Write a description here"\nuser_username: <user>\nuser_password: <password>\n# Don\'t show credentials if the user isn\'t supposed to log in directly\nshow_creds: true\nroot_username: root\nroot_password: <password>\nshow_root_creds: false\nlogin_as_root: false\n\nshow_readme: true\n#Don\'t show IP for scanning labs\nshow_ip: true\nssh_port: 22\nos_variant: "{os_variant}"\ncpus: "{cpus}"\nmem: "{memory}"')
 
     if not existing_qcow2:
         os.system(f'qemu-img create -f qcow2 {VMPATH / name}.qcow2 {size}')
@@ -255,6 +256,10 @@ def setup():
 
     try:
         shutil.copyfile(sys.argv[0], '/bin/lab.py')
+        with open('/bin/lab.sh', 'w') as f:
+            f.write('/usr/bin/env bash\n/bin/lab.py')
+        with open('~/.bashrc', 'a') as f:
+            fowrite('\nalias lab="sudo /bin/lab.sh"')
     except:
         error('Cannot copy self to /bin. Add to your PATH manually')
 
@@ -289,7 +294,7 @@ def parse_args():
     create_lab_args = sp.add_parser('create_lab')
     create_lab_args.add_argument('category')
     create_lab_args.add_argument('name')
-    create_lab_args.add_argument('--first-time', help='Add the initial directories and copy self to {SCRIPT_LOCATION}')
+    create_lab_args.add_argument('--first-time', action='store_true', help='Add the initial directories and copy self to {SCRIPT_LOCATION}')
 
     create_vm_args = sp.add_parser('create_vm')
     create_vm_args.add_argument('category')
