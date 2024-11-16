@@ -12,12 +12,11 @@ VMSIZE =            '40G'
 VMCPUS =            '4'
 VMMEM =             '8192'
 
+
 class Lab:
     def __init__(self, path):
         self.name = path.name
         self.path = path
-        with open(self.path / 'README.txt', 'r') as f:
-            self.description = f.readlines()[0]
 
     def start(self):
         exercise_id = f'{self.path.parent.name}-{self.name}-{datetime.datetime.now().strftime("%d%H%M%S")}'
@@ -26,7 +25,12 @@ class Lab:
         exercise.start()
 
     def info(self):
-        print(self.description)
+        with open(self.path / 'README.txt', 'r') as f:
+            lab_info_text = f.readlines()[0].strip() + '\nVMS:'
+        for vm in [x.name for x in (self.path / 'vms').iterdir()]:
+            lab_info_text += f'\n\t{vm}'
+        return lab_info_text
+
 
 class Exercise:
     # Get status from directory
@@ -72,13 +76,13 @@ class Exercise:
         for vm in self.vms:
             vm.resume()
 
-    def info():
-        for vm in vms:
-            print(vm.name)
-            print(f'\t{vm.description}')
-            if vm.show_ip: print(f'\tIP: {vm.ip}')
-            if vm.show_creds: print(f'\tUsername: {vm.user_username}\n\tPassword: {vm.user_password}')
-            if vm.show_root_creds: print(f'Root username: {vm.root_username}\n\tRoot password: {vm.root_password}')
+    def info(self):
+        with open(self.lab_path / 'README.txt') as f:
+            exercise_info_text = f.readlines()[0].strip() + '\nVMs:'
+        for vm in self.vms:
+            exercise_info_text += '\n' + vm.info()
+        return exercise_info_text
+
 
 class VM:
     def __init__(self, category, lab_name, id, name):
@@ -91,7 +95,11 @@ class VM:
 
     def info(self):
         self.loadDetails()
-
+        vm_info_text = f'{self.name}\n\t{self.description}'
+        if self.show_ip: vm_info_text += f'\n\tIP: {self.ip}'
+        if self.show_creds: vm_info_text += f'\n\tUsername: {self.user_username}\n\tPassword: {self.user_password}'
+        if self.show_root_creds: vm_info_text += f'\n\tRoot username: {self.root_username}\n\tRoot password: {self.root_password}'
+        return vm_info_text
 
     def getIP(self):
         ip = '-'
@@ -119,6 +127,7 @@ class VM:
         else: self.cpus = VMCPUS
         if 'mem' in creds.keys(): self.mem = creds['mem']
         else: self.mem = VMMEM
+        self.ip = self.getIP()
 
     def start(self):
         self.image = self.lab_path / f'{self.name}.qcow2'
@@ -128,7 +137,7 @@ class VM:
 
         self.loadDetails()
 
-        self.running_path.mkdir()
+        self.running_path.mkdir(exist_ok=True)
         self.running_image = self.running_path / f'{self.running_name}.qcow2'
 
         os.system(f'qemu-img create -f qcow2 -F qcow2 -b {self.image} {self.running_image}')
@@ -137,7 +146,16 @@ class VM:
 
     def setup(self):
         self.ip = self.getIP()
-        
+        if (self.running_path / 'ip.yaml').exists():
+            with open(self.running_path / 'ip.yaml', 'r') as f:
+                ips = yaml.safe_load(f)
+                ips[self.name] = self.ip
+        else:
+            ips = {self.name: self.ip}
+
+        with open(self.running_path / 'ip.yaml', 'w') as f:
+            yaml.dump(ips, f)
+
         socket = paramiko.SSHClient()
         socket.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
@@ -182,7 +200,6 @@ class VM:
         if self.show_root_creds:
             print(f'Credentials are {self.root_username} / {self.root_password}\n')
 
-
     def stop(self):
         os.system(f'virsh destroy {self.running_name}')
         os.system(f'virsh undefine {self.running_name}')
@@ -199,6 +216,7 @@ class VM:
             print(f'Credentials are {self.user_username} / {self.user_password}\n')
         if self.show_root_creds:
             print(f'Credentials are {self.root_username} / {self.root_password}\n')
+
 
 def createLab(category, name):
     (LABS_DIR / category).mkdir(exist_ok=True)
@@ -217,6 +235,7 @@ def createLab(category, name):
     For each VM, put any files you wish transferred to the VM into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
     Then add any scripts you wish to run into the user or root scripts directory. They will be put into the VM\'s "/tmp" directory after it boots, then automatically executed as the appropriate user\n\
     Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template.\n')
+
 
 def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2, iso):
     VMPATH = LABS_DIR / category / lab / 'vms' / name
@@ -244,9 +263,11 @@ def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2
         os.system(f'virt-install --name {name} --vcpus {cpus} --memory {memory} --os-variant {os_variant} --controller=scsi,model=virtio-scsi --disk path={existing_qcow2},bus=scsi --import --noautoconsole --noreboot')
         os.chmod((VMPATH / f'{name}.qcow2'), 0o440)
 
+
 def error(msg):
     print(f'[!] {msg}')
     sys.exit()
+
 
 def setup():
     BASE_DIR.mkdir(exist_ok=True)
@@ -274,9 +295,12 @@ def parse_args():
     list_labs_args = sp.add_parser('list_labs')
     list_labs_args.add_argument('category')
 
-    info_args = sp.add_parser('info')
-    info_args.add_argument('category')
-    info_args.add_argument('lab')
+    exercise_info_args = sp.add_parser('exercise_info')
+    exercise_info_args.add_argument('exercise_id')
+
+    lab_info_args = sp.add_parser('lab_info')
+    lab_info_args.add_argument('category')
+    lab_info_args.add_argument('lab')
 
     start_args = sp.add_parser('start')
     start_args.add_argument('category')
@@ -309,6 +333,7 @@ def parse_args():
 
     return args.parse_args()
 
+
 def checkExistence(type, name, category=None):
     if type == 'category':
         options = [x.name for x in LABS_DIR.iterdir()]
@@ -337,8 +362,11 @@ def main():
         case 'list_labs':
             print(" ".join([x.name for x in (LABS_DIR / args.category).iterdir()]))
 
-        case 'info': 
-            Lab(LABS_DIR / args.category / args.lab).info()
+        case 'exercise_info':
+            print(Exercise(args.exercise_id).info())
+
+        case 'lab_info': 
+            print(Lab(LABS_DIR / args.category / args.lab).info())
 
         case 'start':
             Lab(LABS_DIR / args.category / args.lab).start()
