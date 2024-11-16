@@ -146,15 +146,6 @@ class VM:
 
     def setup(self):
         self.ip = self.getIP()
-        if (self.running_path / 'ip.yaml').exists():
-            with open(self.running_path / 'ip.yaml', 'r') as f:
-                ips = yaml.safe_load(f)
-                ips[self.name] = self.ip
-        else:
-            ips = {self.name: self.ip}
-
-        with open(self.running_path / 'ip.yaml', 'w') as f:
-            yaml.dump(ips, f)
 
         socket = paramiko.SSHClient()
         socket.set_missing_host_key_policy(paramiko.AutoAddPolicy())
