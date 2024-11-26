@@ -80,6 +80,7 @@ class Exercise:
         with open(self.lab_path / 'README.txt') as f:
             exercise_info_text = f.readlines()[0].strip() + '\nVMs:'
         for vm in self.vms:
+            vm.getIP()
             exercise_info_text += '\n' + vm.info()
         return exercise_info_text
 
@@ -127,7 +128,7 @@ class VM:
         else: self.cpus = VMCPUS
         if 'mem' in creds.keys(): self.mem = creds['mem']
         else: self.mem = VMMEM
-        self.ip = self.getIP()
+        #self.ip = self.getIP()
 
     def start(self):
         self.image = self.lab_path / f'{self.name}.qcow2'
@@ -161,11 +162,12 @@ class VM:
             
             if self.show_readme:
                 shutil.copyfile(self.lab_path.parent.parent / 'README.txt', 'tmp_README.txt')
-                with open('tmp_README.txt', 'r') as f:
+                with open(self.lab_path / 'README.txt', 'r') as f:
                     initial_contents = f.read()
+                with open('tmp_README.txt', 'r') as f:
+                    final_contents = initial_contents + '\n' + f.read()
                 with open('tmp_README.txt', 'w') as f:
-                    with open(self.lab_path / 'README.txt', 'r+') as g:
-                        g.write(initial_contents + g.read())
+                    f.write(final_contents)
                 scpsocket.put( 'tmp_README.txt', 'README.txt')
                 os.remove('tmp_README.txt')
             scpsocket.close()
