@@ -96,7 +96,8 @@ class VM:
 
     def info(self):
         self.loadDetails()
-        vm_info_text = f'{self.name}\n\t{self.description}'
+        self.ip = self.getIP()
+        vm_info_text = f'  {self.name}\n\t{self.description}'
         if self.show_ip: vm_info_text += f'\n\tIP: {self.ip}'
         if self.show_creds: vm_info_text += f'\n\tUsername: {self.user_username}\n\tPassword: {self.user_password}'
         if self.show_root_creds: vm_info_text += f'\n\tRoot username: {self.root_username}\n\tRoot password: {self.root_password}'
@@ -202,13 +203,14 @@ class VM:
 
     def resume(self):
         os.system(f'virsh start {self.running_name}')
+        self.loadDetails()
         self.ip = self.getIP()
 
         print(f'[*] {self.running_name} resumed with IP: {self.ip}')
         if self.show_creds:
-            print(f'Credentials are {self.user_username} / {self.user_password}\n')
+            print(f'[*] Credentials are {self.user_username} / {self.user_password}\n')
         if self.show_root_creds:
-            print(f'Credentials are {self.root_username} / {self.root_password}\n')
+            print(f'[*] Credentials are {self.root_username} / {self.root_password}\n')
 
 
 def createLab(category, name):
@@ -367,7 +369,7 @@ def main():
         case 'stop':
             Exercise(args.exercise_id).stop()
 
-        case 'save':
+        case 'suspend':
             Exercise(args.exercise_id).suspend()
             
         case 'resume':
