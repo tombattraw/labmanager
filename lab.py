@@ -1,16 +1,22 @@
 #!/usr/bin/env python3
 
-import os, subprocess, argparse, pathlib, shutil, yaml, sys, time, paramiko, datetime
+import warnings; warnings.warn = lambda *args,**kwargs: None
+import os, subprocess, argparse, pathlib, shutil, yaml, sys, time, paramiko, datetime, grp
 from scp import SCPClient
 
 BASEDIR =           pathlib.Path('/opt/lab')
 LABS_DIR =          pathlib.Path(BASEDIR / 'labs')
 ACTIVE_DIR =        pathlib.Path(BASEDIR / 'active')
 SUSPENDED_DIR =     pathlib.Path(BASEDIR / 'suspended')
+IMAGE_DIR =         pathlib.Path(BASEDIR / 'images')
+ISO_DIR =           pathlib.Path(BASEDIR / 'isos')
 SCRIPT_LOCATION =   pathlib.Path('/bin/lab.py')
 VMSIZE =            '40G'
 VMCPUS =            '4'
 VMMEM =             '8192'
+
+# Will create a copy of ISO files used to create VMs in the ISO_DIR. Allows reuse without having to hunt them down; the create_vm() function looks there first
+CACHE_ISOS = True
 
 
 class Lab:
@@ -214,6 +220,8 @@ class VM:
 
 
 def createLab(category, name):
+    os.setegid(grp.getgrnam('vms').gr_gid)
+
     (LABS_DIR / category).mkdir(exist_ok=True)
 
     if checkExistence('lab', name, category) is True:
@@ -229,17 +237,21 @@ def createLab(category, name):
     Created VMs go in the "vms" directory\n\
     For each VM, put any files you wish transferred to the VM into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
     Then add any scripts you wish to run into the user or root scripts directory. They will be put into the VM\'s "/tmp" directory after it boots, then automatically executed as the appropriate user\n\
-    Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template.\n')
+    Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template; they\'re needed to transfer files or run scripts.\n')
+
+    os.setegid(0)
+
 
 
 def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2, iso):
+    os.setegid(grp.getgrnam('vms').gr_gid)
+
     VMPATH = LABS_DIR / category / lab / 'vms' / name
     VMPATH.mkdir()
     with open(VMPATH / 'README.txt', 'w') as f:
-        f.write('In this file, write instructions on what to do in this lab\n\
-    The first line should be the description; a quick blurb to describe the function of the lab\n\
-    Created VMs go in the "vms" directory\n\
-    For each VM, put any files you wish transferred in into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
+        f.write('In this file, write instructions on what to do for this VM\n\
+    The first line should be the description; a quick blurb to describe the function of the VM\n\
+    Put any files you wish transferred in into its "files" folder. These will be put into the VM\'s "/tmp" directory after it boots.\n\
     Then add any scripts you wish to run into the user or root scripts directory. They will be put into the VM\'s "/tmp" directory after it boots, then automatically executed as the appropriate user\n\
     Remember to put credentials into the VM\'s "details.yaml" file using YAML syntax from the template.\n')
     (VMPATH / 'user_scripts').mkdir()
@@ -248,15 +260,27 @@ def createVM(category, lab, name, os_variant, size, cpus, memory, existing_qcow2
     with open(VMPATH / 'details.yaml', 'w') as f:
         f.write(f'description: "Write a description here"\nuser_username: <user>\nuser_password: <password>\n# Don\'t show credentials if the user isn\'t supposed to log in directly\nshow_creds: true\nroot_username: root\nroot_password: <password>\nshow_root_creds: false\nlogin_as_root: false\n\nshow_readme: true\n#Don\'t show IP for scanning labs\nshow_ip: true\nssh_port: 22\nos_variant: "{os_variant}"\ncpus: "{cpus}"\nmem: "{memory}"')
 
+    # Only symlinks are stored in VM directories. The qcow images are stored in IMAGE_DIR, while the ISO files are stored in ISO_DIR. Only symlinks go in the VM's directory
+
     if not existing_qcow2:
-        os.system(f'qemu-img create -f qcow2 {VMPATH / name}.qcow2 {size}')
+        os.system(f'qemu-img create -f qcow2 {IMAGE_DIR / name}.qcow2 {size}')
+        os.symlink(IMAGE_DIR / f'{name}.qcow2', VMPATH / f'{name}.qcow2')
+        os.chmod(IMAGE_DIR / f'{name}.qcow2', 0o444)
+
+        if (ISO_DIR / iso).exists(): iso = ISO_DIR / iso
+        elif CACHE_ISOS and pathlib.Path(iso).exists(): shutil.copyfile(iso, ISO_DIR / pathlib.Path(iso).name)
+        else: error('ISO file cannot be found')
+
+        os.chmod((VMPATH / f'{name}.qcow2'), 0o755)
         os.system(f'virt-install --name {name} --vcpus {cpus} --memory {memory} --os-variant {os_variant} --controller=scsi,model=virtio-scsi --disk path={VMPATH / name}.qcow2,bus=scsi --cdrom={iso} --noreboot')
-        os.chmod((VMPATH / f'{name}.qcow2'), 0o440)
+        os.chmod((VMPATH / f'{name}.qcow2'), 0o444)
 
     else:
-        shutil.copyfile(existing_qcow2, f'{VMPATH / name}.qcow2')
+        shutil.copyfile(existing_qcow2, f'{IMAGE_DIR / name}.qcow2')
+        os.symlink(IMAGE_DIR / f'{name}.qcow2', VMPATH / f'{name}.qcow2')
+        os.chmod(IMAGE_DIR / f'{name}.qcow2', 0o444)
         os.system(f'virt-install --name {name} --vcpus {cpus} --memory {memory} --os-variant {os_variant} --controller=scsi,model=virtio-scsi --disk path={existing_qcow2},bus=scsi --import --noautoconsole --noreboot')
-        os.chmod((VMPATH / f'{name}.qcow2'), 0o440)
+        os.chmod((VMPATH / f'{name}.qcow2'), 0o444)
 
 
 def error(msg):
@@ -268,6 +292,8 @@ def setup():
     BASE_DIR.mkdir(exist_ok=True)
     LABS_DIR.mkdir(exist_ok=True)
     ACTIVE_DIR.mkdir(exist_ok=True)
+    ISO_DIR.mkdir(exist_ok=True)
+    IMAGE_DIR.mkdir(exist_ok=True)
     SUSPENDED_DIR.mkdir(exist_ok=True)
 
     try:
